@@ -26,7 +26,8 @@ type Config struct {
 	RedisPassword string
 
 	// JWT
-	JWTSecret        string
+	JWTPrivateKey    string
+	JWTPublicKey     string
 	JWTAccessExpiry  time.Duration
 	JWTRefreshExpiry time.Duration
 
@@ -71,7 +72,8 @@ func Load() (*Config, error) {
 		RedisURL:      getEnv("REDIS_URL", "localhost:6379"),
 		RedisPassword: getEnv("REDIS_PASSWORD", ""),
 
-		JWTSecret:        getEnv("JWT_SECRET", "your-secret-key"),
+		JWTPrivateKey:    getEnv("JWT_PRIVATE_KEY", ""),
+		JWTPublicKey:     getEnv("JWT_PUBLIC_KEY", ""),
 		JWTAccessExpiry:  parseDuration(getEnv("JWT_ACCESS_EXPIRY", "15m")),
 		JWTRefreshExpiry: parseDuration(getEnv("JWT_REFRESH_EXPIRY", "168h")),
 
@@ -123,7 +125,7 @@ func parseCommaSeparated(s string) []string {
 	if s == "" {
 		return []string{}
 	}
-	
+
 	var result []string
 	for _, item := range split(s, ',') {
 		trimmed := trim(item)
@@ -137,7 +139,7 @@ func parseCommaSeparated(s string) []string {
 func split(s string, sep rune) []string {
 	var result []string
 	current := ""
-	
+
 	for _, char := range s {
 		if char == sep {
 			result = append(result, current)
@@ -147,25 +149,25 @@ func split(s string, sep rune) []string {
 		}
 	}
 	result = append(result, current)
-	
+
 	return result
 }
 
 func trim(s string) string {
 	start := 0
 	end := len(s) - 1
-	
+
 	for start <= end && (s[start] == ' ' || s[start] == '\t' || s[start] == '\n') {
 		start++
 	}
-	
+
 	for end >= start && (s[end] == ' ' || s[end] == '\t' || s[end] == '\n') {
 		end--
 	}
-	
+
 	if start > end {
 		return ""
 	}
-	
+
 	return s[start : end+1]
 }

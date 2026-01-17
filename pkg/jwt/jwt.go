@@ -1,7 +1,9 @@
 package jwt
 
 import (
+	"crypto/rsa"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -21,17 +23,29 @@ type Claims struct {
 }
 
 type JWTManager struct {
-	secretKey        string
-	accessExpiry     time.Duration
-	refreshExpiry    time.Duration
+	privateKey    *rsa.PrivateKey
+	publicKey     *rsa.PublicKey
+	accessExpiry  time.Duration
+	refreshExpiry time.Duration
 }
 
-func NewJWTManager(secret string, accessExpiry, refreshExpiry time.Duration) *JWTManager {
+func NewJWTManager(privateKeyPEM, publicKeyPEM string, accessExpiry, refreshExpiry time.Duration) (*JWTManager, error) {
+	privateKey, err := jwt.ParseRSAPrivateKeyFromPEM([]byte(privateKeyPEM))
+	if err != nil {
+		return nil, fmt.Errorf("invalid private key: %w", err)
+	}
+
+	publicKey, err := jwt.ParseRSAPublicKeyFromPEM([]byte(publicKeyPEM))
+	if err != nil {
+		return nil, fmt.Errorf("invalid public key: %w", err)
+	}
+
 	return &JWTManager{
-		secretKey:     secret,
+		privateKey:    privateKey,
+		publicKey:     publicKey,
 		accessExpiry:  accessExpiry,
 		refreshExpiry: refreshExpiry,
-	}
+	}, nil
 }
 
 func (m *JWTManager) GenerateAccessToken(userID uuid.UUID, email string) (string, error) {
@@ -46,8 +60,8 @@ func (m *JWTManager) GenerateAccessToken(userID uuid.UUID, email string) (string
 		},
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(m.secretKey))
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	return token.SignedString(m.privateKey)
 }
 
 func (m *JWTManager) GenerateRefreshToken(userID uuid.UUID, email string) (string, error) {
@@ -62,8 +76,8 @@ func (m *JWTManager) GenerateRefreshToken(userID uuid.UUID, email string) (strin
 		},
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(m.secretKey))
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+	return token.SignedString(m.privateKey)
 }
 
 func (m *JWTManager) VerifyToken(tokenString string) (*Claims, error) {
@@ -71,10 +85,10 @@ func (m *JWTManager) VerifyToken(tokenString string) (*Claims, error) {
 		tokenString,
 		&Claims{},
 		func(token *jwt.Token) (interface{}, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, ErrInvalidToken
+			if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
-			return []byte(m.secretKey), nil
+			return m.publicKey, nil
 		},
 	)
 
@@ -85,10 +99,6 @@ func (m *JWTManager) VerifyToken(tokenString string) (*Claims, error) {
 	claims, ok := token.Claims.(*Claims)
 	if !ok || !token.Valid {
 		return nil, ErrInvalidToken
-	}
-
-	if time.Now().After(claims.ExpiresAt.Time) {
-		return nil, ErrExpiredToken
 	}
 
 	return claims, nil

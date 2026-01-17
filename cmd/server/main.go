@@ -6,11 +6,17 @@ import (
 	"net/http"
 	"time"
 
+	"os"
+
+	"github.com/DoDuy2004/slack-clone/backend/internal/config"
+	"github.com/DoDuy2004/slack-clone/backend/internal/database"
+	"github.com/DoDuy2004/slack-clone/backend/internal/handler"
+	"github.com/DoDuy2004/slack-clone/backend/internal/middleware"
+	"github.com/DoDuy2004/slack-clone/backend/internal/repository"
+	"github.com/DoDuy2004/slack-clone/backend/internal/service"
+	"github.com/DoDuy2004/slack-clone/backend/pkg/jwt"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/yourusername/slack-clone-backend/internal/config"
-	"github.com/yourusername/slack-clone-backend/internal/database"
-	"github.com/yourusername/slack-clone-backend/pkg/jwt"
 )
 
 func main() {
@@ -31,18 +37,40 @@ func main() {
 	defer db.Close()
 
 	// Connect to Redis
-	redis, err := database.NewRedisClient(cfg.RedisURL, cfg.RedisPassword)
+	redisClient, err := database.NewRedisClient(cfg.RedisURL, cfg.RedisPassword)
 	if err != nil {
 		log.Fatal("Failed to connect to Redis:", err)
 	}
-	defer redis.Close()
+	defer redisClient.Close()
 
 	// Initialize JWT manager
-	jwtManager := jwt.NewJWTManager(
-		cfg.JWTSecret,
+	privateKey, err := os.ReadFile("private.pem")
+	if err != nil {
+		log.Fatal("Failed to read private key:", err)
+	}
+	publicKey, err := os.ReadFile("public.pem")
+	if err != nil {
+		log.Fatal("Failed to read public key:", err)
+	}
+
+	jwtManager, err := jwt.NewJWTManager(
+		string(privateKey),
+		string(publicKey),
 		cfg.JWTAccessExpiry,
 		cfg.JWTRefreshExpiry,
 	)
+	if err != nil {
+		log.Fatal("Failed to initialize JWT manager:", err)
+	}
+
+	// Initialize repositories
+	userRepo := repository.NewUserRepository(db)
+
+	// Initialize services
+	authService := service.NewAuthService(userRepo, jwtManager)
+
+	// Initialize handlers
+	authHandler := handler.NewAuthHandler(authService)
 
 	// Create Gin router
 	router := gin.Default()
@@ -68,30 +96,21 @@ func main() {
 	// API routes
 	api := router.Group("/api")
 	{
+		// CSRF Protection for state-changing requests
+		api.Use(middleware.CSRFMiddleware(cfg.AllowedOrigins))
+
 		// Auth routes
 		auth := api.Group("/auth")
 		{
-			auth.POST("/register", func(c *gin.Context) {
-				// TODO: Implement register handler
-				c.JSON(http.StatusOK, gin.H{"message": "Register endpoint - TODO"})
-			})
-			auth.POST("/login", func(c *gin.Context) {
-				// TODO: Implement login handler
-				c.JSON(http.StatusOK, gin.H{"message": "Login endpoint - TODO"})
-			})
-			auth.POST("/refresh", func(c *gin.Context) {
-				// TODO: Implement refresh handler
-				c.JSON(http.StatusOK, gin.H{"message": "Refresh endpoint - TODO"})
-			})
-			auth.POST("/logout", func(c *gin.Context) {
-				// TODO: Implement logout handler
-				c.JSON(http.StatusOK, gin.H{"message": "Logout endpoint - TODO"})
-			})
+			auth.POST("/register", authHandler.Register)
+			auth.POST("/login", authHandler.Login)
+			auth.POST("/refresh", authHandler.Refresh)
+			auth.POST("/logout", authHandler.Logout)
 		}
 
 		// Protected routes (require authentication)
 		protected := api.Group("")
-		// protected.Use(authMiddleware(jwtManager))
+		protected.Use(middleware.AuthMiddleware(jwtManager))
 		{
 			// User routes
 			users := protected.Group("/users")
