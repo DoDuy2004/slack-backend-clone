@@ -65,12 +65,15 @@ func main() {
 
 	// Initialize repositories
 	userRepo := repository.NewUserRepository(db)
+	workspaceRepo := repository.NewWorkspaceRepository(db)
 
 	// Initialize services
 	authService := service.NewAuthService(userRepo, jwtManager)
+	workspaceService := service.NewWorkspaceService(workspaceRepo)
 
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(authService, cfg)
+	workspaceHandler := handler.NewWorkspaceHandler(workspaceService)
 
 	// Create Gin router
 	router := gin.Default()
@@ -79,7 +82,7 @@ func main() {
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.AllowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-CSRF-Token", "X-Requested-With"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
@@ -126,15 +129,11 @@ func main() {
 			// Workspace routes
 			workspaces := protected.Group("/workspaces")
 			{
-				workspaces.GET("", func(c *gin.Context) {
-					c.JSON(http.StatusOK, gin.H{"message": "List workspaces - TODO"})
-				})
-				workspaces.POST("", func(c *gin.Context) {
-					c.JSON(http.StatusOK, gin.H{"message": "Create workspace - TODO"})
-				})
-				workspaces.GET("/:id", func(c *gin.Context) {
-					c.JSON(http.StatusOK, gin.H{"message": "Get workspace - TODO"})
-				})
+				workspaces.GET("", workspaceHandler.List)
+				workspaces.POST("", workspaceHandler.Create)
+				workspaces.GET("/:id", workspaceHandler.Get)
+				workspaces.PUT("/:id", workspaceHandler.Update)
+				workspaces.DELETE("/:id", workspaceHandler.Delete)
 			}
 
 			// Channel routes
