@@ -14,6 +14,7 @@ import (
 	"github.com/DoDuy2004/slack-clone/backend/internal/middleware"
 	"github.com/DoDuy2004/slack-clone/backend/internal/repository"
 	"github.com/DoDuy2004/slack-clone/backend/internal/service"
+	"github.com/DoDuy2004/slack-clone/backend/internal/websocket"
 	"github.com/DoDuy2004/slack-clone/backend/pkg/jwt"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -75,11 +76,16 @@ func main() {
 	channelService := service.NewChannelService(channelRepo, workspaceRepo)
 	messageService := service.NewMessageService(messageRepo, channelRepo, workspaceRepo)
 
+	// Initialize WebSocket Hub
+	hub := websocket.NewHub()
+	go hub.Run()
+
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(authService, cfg)
 	workspaceHandler := handler.NewWorkspaceHandler(workspaceService)
 	channelHandler := handler.NewChannelHandler(channelService)
-	messageHandler := handler.NewMessageHandler(messageService)
+	messageHandler := handler.NewMessageHandler(messageService, hub) // Inject hub
+	wsHandler := websocket.NewHandler(hub, jwtManager)
 
 	// Create Gin router
 	router := gin.Default()
@@ -121,6 +127,9 @@ func main() {
 		protected := api.Group("")
 		protected.Use(middleware.AuthMiddleware(jwtManager))
 		{
+			// WebSocket endpoint
+			protected.GET("/ws", wsHandler.ServeWS)
+
 			// User routes
 			users := protected.Group("/users")
 			{
@@ -167,12 +176,6 @@ func main() {
 			}
 		}
 	}
-
-	// WebSocket endpoint
-	router.GET("/ws", func(c *gin.Context) {
-		// TODO: Implement WebSocket handler
-		c.JSON(http.StatusOK, gin.H{"message": "WebSocket endpoint - TODO"})
-	})
 
 	// WebRTC signaling endpoint
 	router.GET("/webrtc/signaling", func(c *gin.Context) {

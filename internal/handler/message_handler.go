@@ -1,22 +1,26 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 
 	"github.com/DoDuy2004/slack-clone/backend/internal/models/dto"
 	"github.com/DoDuy2004/slack-clone/backend/internal/service"
+	"github.com/DoDuy2004/slack-clone/backend/internal/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
 type MessageHandler struct {
 	messageService service.MessageService
+	hub            *websocket.Hub
 }
 
-func NewMessageHandler(messageService service.MessageService) *MessageHandler {
+func NewMessageHandler(messageService service.MessageService, hub *websocket.Hub) *MessageHandler {
 	return &MessageHandler{
 		messageService: messageService,
+		hub:            hub,
 	}
 }
 
@@ -46,6 +50,14 @@ func (h *MessageHandler) Send(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	// Broadcast via WebSocket
+	payload, _ := json.Marshal(message)
+	h.hub.Broadcast(&websocket.WSMessage{
+		Type:      websocket.EventMessageNew,
+		Payload:   payload,
+		ChannelID: message.ChannelID,
+	})
 
 	c.JSON(http.StatusCreated, message)
 }
@@ -136,6 +148,14 @@ func (h *MessageHandler) Update(c *gin.Context) {
 		return
 	}
 
+	// Broadcast update
+	payload, _ := json.Marshal(message)
+	h.hub.Broadcast(&websocket.WSMessage{
+		Type:      websocket.EventMessageUpdated,
+		Payload:   payload,
+		ChannelID: message.ChannelID,
+	})
+
 	c.JSON(http.StatusOK, message)
 }
 
@@ -163,6 +183,12 @@ func (h *MessageHandler) Delete(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
+
+	// Broadcast deletion
+	h.hub.Broadcast(&websocket.WSMessage{
+		Type:    websocket.EventMessageDeleted,
+		Payload: []byte(`{"id":"` + id.String() + `"}`),
+	})
 
 	c.JSON(http.StatusOK, gin.H{"message": "Message deleted successfully"})
 }
